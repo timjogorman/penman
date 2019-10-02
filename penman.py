@@ -13,7 +13,7 @@ module as a script.
 """
 
 from __future__ import print_function
-
+import networkx as nx
 USAGE = '''
 Penman
 
@@ -130,7 +130,7 @@ class PENMANCodec(object):
     COMMA_RE = re.compile(r'\s*,\s*')
     SPACING_RE = re.compile(r'\s*')
 
-    def __init__(self, indent=True, relation_sort=original_order):
+    def __init__(self, indent=True, relation_sort=original_order, reify_attributes=False):
         """
         Initialize a new codec.
 
@@ -144,7 +144,7 @@ class PENMANCodec(object):
         """
         self.indent = indent
         self.relation_sort = relation_sort
-
+        self.reify_attributes = reify_attributes
     def decode(self, s, triples=False):
         """
         Deserialize PENMAN-notation string *s* into its Graph object.
@@ -171,10 +171,20 @@ class PENMANCodec(object):
             else:
                 span, data = self._decode_penman_node(s)
         except IndexError:
-            raise DecodeError(
-                'Unexpected end of string.', string=s, pos=len(s)
-            )
+            raise DecodeError('Unexpected end of string.', string=s, pos=len(s))
         top, nodes, edges = data
+        if self.reify_attributes:
+            new_edges = []
+            counter = 101
+            for relation in edges:
+                if not relation[2] in [x[0] for x in nodes]:
+                    counter +=1
+
+                    nodes.append(Triple("x"+str(counter), "instance", "_"+str(relation[2])))
+                    new_edges.append((relation[0], relation[1], "x"+str(counter)))
+                else:
+                    new_edges.append(relation)
+            edges=  new_edges
         return self.triples_to_graph(nodes + edges, top=top)
 
     def iterdecode(self, s, triples=False):
@@ -637,7 +647,8 @@ class Graph(object):
             data = []
         else:
             data = list(data)  # make list (e.g., if its a generator)
-
+        self.edge_matrix = None
+        self.amr_graph_object = None
         if data:
             self._triples.extend(
                 Triple(*t, inverted=getattr(t, 'inverted', None))
@@ -703,6 +714,91 @@ class Graph(object):
         edges = [t for t in self._triples if t.target in variables]
         return list(filter(edgematch, edges))
 
+    def amr_transformer_path(self, max_distance=4, shortening_method="middle", add_nodes=False, plusminus=False, ordered_variable_list=None):
+        """
+        Return a dictionary with a concept sequence and a path sequence
+        """
+        triples = [x for x in self.triples() if x.relation == 'instance']
+        if ordered_variable_list is None:
+            variables = [x.source for x in triples]
+        else:
+            variables = ordered_variable_list
+        concepts = [x.target.strip("_") for x in triples]
+        each_path =[]  
+        for each_variable in variables+["EOS"]:
+            all_paths = []
+            for each_other_variable in variables+["EOS"]:
+                if each_variable == "EOS" and each_other_variable == "EOS":
+                    all_paths.append("None")
+                elif each_variable == "EOS":
+                    all_paths.append("-:EOS")
+                elif each_other_variable == "EOS":
+                    all_paths.append("+:EOS")
+                else:
+                    all_paths.append(self.get_path(each_variable, each_other_variable, max_distance, shortening_method, add_nodes, plusminus))
+            each_path.append(" ".join(all_paths))
+        return {"concept_list":" ".join(concepts)+" ", "path":" ".join(each_path)}
+
+    def get_path(self, each_variable, each_other_variable, max_distance=4, shortening_method="middle", add_nodes=False, plusminus=False):
+        """
+        Return a representation of the path between two variables
+        """
+        if self.edge_matrix is None:
+            self.get_edge_matrix_and_graph_object()
+        its_path = []
+        all_concepts = {x.source:x.target for x in self.triples() if x.relation == 'instance'}
+        if not each_variable == each_other_variable:
+            apsg = nx.shortest_path(self.amr_graph_object, each_variable, each_other_variable)
+            relation_path_sequence = [(":"+self.edge_matrix[arc], all_concepts[arc[1]]) for arc in list(zip(apsg, apsg[1:]))]
+            its_path = []
+            for some_path in relation_path_sequence:
+                if add_nodes:
+                    its_path += some_path
+                else:
+                    its_path += [some_path[0]]
+            if add_nodes:
+                its_path.pop()
+            middle = int(max_distance/2.0)
+            middle2 = middle +1
+            while len(its_path) > max_distance:
+                if shortening_method == "middle":
+                    its_path[middle] = "<CONCAT>"
+                    its_path.pop(min(middle2, len(its_path)))
+                elif shortening_method == "end":
+                    its_path.pop()
+                else:
+                    logging.error("shortening method not present, using end")
+                    its_path.pop()
+        else:
+            its_path = ["None"]
+        if plusminus:
+            pm = []
+            for item in its_path:
+                if item == "None":
+                    pm.append(item)
+                elif item.endswith("-of"):
+                    pm.append("-"+item[:-3])
+                else:
+                    pm.append("+"+item)
+            its_path= pm
+        return "".join(its_path)
+
+    def get_edge_matrix_and_graph_object(self):
+        all_variables = self.variables()
+        
+        edge_matrix = {}
+        edges = []
+        for each_triple in self.triples():
+            if each_triple.source in all_variables and each_triple.target in all_variables:
+                edge_matrix[(each_triple.source, each_triple.target)] = each_triple.relation
+                if each_triple.relation.endswith('-of'):
+                    edge_matrix[(each_triple.target, each_triple.source)] = each_triple.relation.strip('-of')
+                else:
+                    edge_matrix[(each_triple.target, each_triple.source)] = each_triple.relation+"-of"
+                edges.append((each_triple.source, each_triple.target))
+        self.amr_graph_object = nx.Graph(edges)
+        self.edge_matrix = edge_matrix
+    
     def attributes(self, source=None, relation=None, target=None):
         """
         Return attributes filtered by their *source*, *relation*, or *target*.
@@ -808,6 +904,24 @@ def decode(s, cls=PENMANCodec, **kwargs):
     codec = cls(**kwargs)
     return codec.decode(s)
 
+def decode_stripping_metadata(s, cls=PENMANCodec, **kwargs):
+    """
+    Deserialize PENMAN-serialized *s* into its Graph object
+
+    Args:
+        s: a string containing a single PENMAN-serialized graph
+        cls: serialization codec class
+        kwargs: keyword arguments passed to the constructor of *cls*
+    Returns:
+        the Graph object described by *s*
+    Example:
+
+        >>> decode('(b / bark :ARG1 (d / dog))')
+        <Graph object (top=b) at ...>
+    """
+    codec = cls(**kwargs)
+
+    return codec.decode("\n".join([x for x in s.split("\n") if not x.startswith("#")]))
 
 def encode(g, top=None, cls=PENMANCodec, **kwargs):
     """
