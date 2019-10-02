@@ -718,13 +718,24 @@ class Graph(object):
         """
         Return a dictionary with a concept sequence and a path sequence
         """
-        triples = [x for x in self.triples() if x.relation == 'instance']
         if ordered_variable_list is None:
-            variables = [x.source for x in triples]
+            # Use default ordering of variables (not the same as the paper)
+            variables = [x.source for x in self.triples() if "instance" == x.relation]
         else:
+            # Use default ordering of variables (not the same as the paper)
             variables = ordered_variable_list
-        concepts = [x.target.strip("_") for x in triples]
-        each_path =[]  
+        concepts = []
+        
+        for each_variable in variables:
+            # Add concepts in order of variables (usually default order, but you can specify with ordered variable list)
+            triples = [x for x in self.triples() if x.relation == 'instance' and x.source ==each_variable]
+            if len(triples) < 1:
+                logging.error("error encoding variable "+each_variable)
+                concepts.append("UNK")
+            else:
+                concepts.append(triples[0].target)
+
+        every_path_from_every_variable =[]  
         for each_variable in variables+["EOS"]:
             all_paths = []
             for each_other_variable in variables+["EOS"]:
@@ -736,35 +747,44 @@ class Graph(object):
                     all_paths.append("+:EOS")
                 else:
                     all_paths.append(self.get_path(each_variable, each_other_variable, max_distance, shortening_method, add_nodes, plusminus))
-            each_path.append(" ".join(all_paths))
-        return {"concept_list":" ".join(concepts)+" ", "path":" ".join(each_path)}
+            every_path_from_every_variable.append(" ".join(all_paths))
+        return {"concept_list":" ".join(concepts)+" ", "path":" ".join(every_path_from_every_variable)}
 
     def get_path(self, each_variable, each_other_variable, max_distance=4, shortening_method="middle", add_nodes=False, plusminus=False):
         """
         Return a representation of the path between two variables
         """
         if self.edge_matrix is None:
+            # initialize the networkx object and a dictionary of edges 
             self.get_edge_matrix_and_graph_object()
         its_path = []
         all_concepts = {x.source:x.target for x in self.triples() if x.relation == 'instance'}
         if not each_variable == each_other_variable:
-            apsg = nx.shortest_path(self.amr_graph_object, each_variable, each_other_variable)
-            relation_path_sequence = [(":"+self.edge_matrix[arc], all_concepts[arc[1]]) for arc in list(zip(apsg, apsg[1:]))]
+            # 
+            shortest_path_as_sequence_of_variables = nx.shortest_path(self.amr_graph_object, each_variable, each_other_variable)
+            shortest_path_as_sequence_of_edges_and_nodes = [(":"+self.edge_matrix[arc], all_concepts[arc[1]]) for arc in list(zip(shortest_path_as_sequence_of_variables, shortest_path_as_sequence_of_variables[1:]))]
             its_path = []
-            for some_path in relation_path_sequence:
+            for some_path in shortest_path_as_sequence_of_edges_and_nodes:
                 if add_nodes:
+                    # if add notes, we use all edges and nodes in path
                     its_path += some_path
                 else:
+                    # otherwise, rip out the nodes
                     its_path += [some_path[0]]
             if add_nodes:
+                # if adding edges and nodes, I'm also adding target node; rips that off the end. 
                 its_path.pop()
-            middle = int(max_distance/2.0)
-            middle2 = middle +1
+
+
             while len(its_path) > max_distance:
                 if shortening_method == "middle":
+                    # when clipping paths, this had you rip things out of the middle instead of end
+                    middle = int(max_distance/2.0)
+                    middle2 = middle +1
                     its_path[middle] = "<CONCAT>"
                     its_path.pop(min(middle2, len(its_path)))
                 elif shortening_method == "end":
+                    # Default behavior, just rip off the target end until of acceptable length
                     its_path.pop()
                 else:
                     logging.error("shortening method not present, using end")
@@ -772,6 +792,7 @@ class Graph(object):
         else:
             its_path = ["None"]
         if plusminus:
+            # Default behavior represents edge direction using AMR "of" relations, switches to +/- 
             pm = []
             for item in its_path:
                 if item == "None":
