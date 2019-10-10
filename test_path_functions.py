@@ -37,6 +37,7 @@ with open(amrfilename) as amr_file:
             # The second AMR is failing because of BPE splits
             # I have no idea why the third is failing. 
             its_valid = its_dict['path'] == test_unit['relation']
+            print(its_dict)
             if its_valid:
                 print("Pass test for type:  "+test_unit["testname"])
             else:
@@ -56,6 +57,7 @@ if len(sys.argv) > 1:
                     if len(raw_amr.strip()) > 0:
                         its_amr = penman.decode(raw_amr, reify_attributes=True)
                         its_dict = its_amr.amr_transformer_path(max_distance=5, shortening_method="end", plusminus=True)
+                        
                         amrs_validated +=1
                         if amrs_validated % 100== 0:
                             logging.info(f"validated {amrs_validated} amrs")
