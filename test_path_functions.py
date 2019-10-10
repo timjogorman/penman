@@ -6,6 +6,7 @@ Run some tests to illustrate getting path representations from the AMR
 """
 import penman
 import sys
+import os
 import json
 import logging
 
@@ -42,3 +43,20 @@ with open(amrfilename) as amr_file:
                 print("Fail test for type:  "+test_unit["testname"])
                 print(its_dict['path'])
                 print(test_unit['relation'])                
+
+if len(sys.argv) > 1:
+    amr_test_folder = sys.argv[1]
+    amrs_validated = 0
+    for each_folder, each_root, each_list_of_files in os.walk(amr_test_folder):
+        for each_amr_file_name in each_list_of_files:
+            its_filename = each_folder+"/"+each_amr_file_name
+            with open(its_filename) as amr_file:
+                for each_amr in amr_file.read().split("\n\n"):
+                    raw_amr = "\n".join([x for x in each_amr.split("\n") if not x.startswith("#")])
+                    if len(raw_amr.strip()) > 0:
+                        its_amr = penman.decode(raw_amr, reify_attributes=True)
+                        its_dict = its_amr.amr_transformer_path(max_distance=5, shortening_method="end", plusminus=True)
+                        amrs_validated +=1
+                        if amrs_validated % 100== 0:
+                            logging.info(f"validated {amrs_validated} amrs")
+                    

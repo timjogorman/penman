@@ -14,6 +14,7 @@ module as a script.
 
 from __future__ import print_function
 import networkx as nx
+import logging
 USAGE = '''
 Penman
 
@@ -733,9 +734,10 @@ class Graph(object):
                 logging.error("error encoding variable "+each_variable)
                 concepts.append("UNK")
             else:
-                concepts.append(triples[0].target)
+                concepts.append(str(triples[0].target))
 
         every_path_from_every_variable =[]  
+        seen_paths = 0
         for each_variable in variables+["EOS"]:
             all_paths = []
             for each_other_variable in variables+["EOS"]:
@@ -748,6 +750,13 @@ class Graph(object):
                 else:
                     all_paths.append(self.get_path(each_variable, each_other_variable, max_distance, shortening_method, add_nodes, plusminus))
             every_path_from_every_variable.append(" ".join(all_paths))
+            seen_paths += len(all_paths)
+
+        # concepts +1 because of the use of the EOS symbol in the output I saw
+        if not ((len(concepts)+1) * (len(concepts)+1)) == seen_paths:
+            its_error = f'square of size of concepts {" ".join(concepts)} not proportional to {seen_paths} paths'
+            logging.error(its_error)
+        
         return {"concept_list":" ".join(concepts)+" ", "path":" ".join(every_path_from_every_variable)}
 
     def get_path(self, each_variable, each_other_variable, max_distance=4, shortening_method="middle", add_nodes=False, plusminus=False):
