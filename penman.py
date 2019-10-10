@@ -180,23 +180,30 @@ class PENMANCodec(object):
             for relation in edges:
                 if not relation[2] in [x[0] for x in nodes]:
                     counter +=1
-                    new_instance_concept = "_"+str(relation[2])
+                    new_instance_concept = str(relation[2])
                     ###### BEWARE this is somewhat sloppily dealing with the (arbtirary, can-hold-anything) attribute stings, 
                     #### And therefore is currently unsafe
                     if "@@_" in new_instance_concept:
                         ## Splits attriubtes with "@@_" elements inside (used for BPE splitting)
                         first_term = new_instance_concept.split("@@_")[0].strip('"').strip("'").replace("'",'').strip("_")
-                        nodes.append(Triple("x"+str(counter), "instance", '_"'+first_term+'"'))
+                        nodes.append(Triple("x"+str(counter), "instance", "_"+'"'+first_term+'@@'+'"'))
                         new_edges.append((relation[0], relation[1], "x"+str(counter)))
                         base = "x"+str(counter)
-                        for other_bpe_element in new_instance_concept.split("@@_")[1:]:
+
+                        for bpe_id, other_bpe_element in enumerate(new_instance_concept.split("@@_")[1:]):
+                            new_name = other_bpe_element.strip("'").strip('"')
+                            if bpe_id == len(new_instance_concept.split("@@_")) -2:
+                                pass
+                            else:
+                                new_name += "@@"
+
                             counter +=1
-                            nodes.append(Triple("x"+str(counter), "instance", '_"'+other_bpe_element.strip('"').strip("'")+'"'))
+                            nodes.append(Triple("x"+str(counter), "instance", "_"+'"'+new_name+'"'))
                             new_edges.append((base, "bpe", "x"+str(counter)))
                             
 
                     else:
-                        nodes.append(Triple("x"+str(counter), "instance", new_instance_concept))
+                        nodes.append(Triple("x"+str(counter), "instance", "_"+new_instance_concept))
                         new_edges.append((relation[0], relation[1], "x"+str(counter)))
                 else:
                     new_edges.append(relation)
